@@ -1,14 +1,24 @@
 import asyncio
+import html
 import logging
+import re
 import sys
 from os import getenv
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardMarkup,
+    InputRichMessage,
+    Message,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -28,6 +38,14 @@ if not TOKEN:
     raise RuntimeError("BOT_TOKEN не найден — проверь файл .env")
 
 dp = Dispatcher()
+
+# Папка с лором: lore/jett.txt, lore/kayo.txt (для "KAY/O") и т.д.
+# Там же видео для лора: lore/jett_present_video.mp4 (без звука — покажется как гифка)
+LORE_DIR = Path(__file__).parent / "lore"
+
+anim_cache: dict[str, str] = {}   # имя видео -> file_id в Telegram (повторно не загружаем)
+lore_anims: dict[int, int] = {}   # chat_id -> id сообщения с гифкой, которое надо убрать при уходе
+MAX_MSG = 4000  # лимит сообщения Telegram — 4096, оставляем запас
 
 # Порядок способностей в карточке
 SLOT_ORDER = {"Ability1": 1, "Ability2": 2, "Grenade": 3, "Ultimate": 4, "Passive": 5}
@@ -115,25 +133,94 @@ def abilities_text(agent: dict) -> str:
     return "\n\n".join(parts)
 
 
+# Если valorant-api отдаёт имена по-русски — переводим их в имя файла
+RU_TO_FILE = {
+    "бримстоун": "brimstone", "вайпер": "viper", "омен": "omen",
+    "киллджой": "killjoy", "сайфер": "cypher", "сова": "sova",
+    "сейдж": "sage", "феникс": "phoenix", "джетт": "jett",
+    "рейна": "reyna", "рейз": "raze", "брич": "breach",
+    "скай": "skye", "йору": "yoru", "астра": "astra",
+    "кайо": "kayo", "чембер": "chamber", "неон": "neon",
+    "фейд": "fade", "харбор": "harbor", "гекко": "gekko",
+    "дэдлок": "deadlock", "изо": "iso", "клов": "clove",
+    "вайс": "vyse", "техо": "tejo", "вэйлэй": "waylay",
+    "вето": "veto", "миск": "miks", "микс": "miks", "хаш": "hush",
+}
+
+
+def lore_path(name: str) -> Path:
+    # "KAY/O" -> kayo.txt, "Jett" -> jett.txt; убираем всё, кроме букв и цифр
+    key = re.sub(r"\W", "", name.lower())
+    return LORE_DIR / (RU_TO_FILE.get(key, key) + ".txt")
+
+
+def log_missing_lore() -> None:
+    # При старте пишем в лог агентов без файла лора — сразу видно, где не совпало имя
+    missing = [
+        a["name"]
+        for role in get_roles(DB_PATH)
+        for a in get_agents_by_role(role, DB_PATH)
+        if not lore_path(a["name"]).exists()
+    ]
+    if missing:
+        logging.warning("Нет файла лора для: %s", ", ".join(missing))
+
+
+def lore_markdown(agent: dict) -> str | None:
+    # Текст для Rich Message: файл лора уже написан в Markdown ("### Заголовок",
+    # таблицы "| a | b |", списки "- ..."), поэтому отдаём его как есть.
+    # Экранировать ничего не нужно — это не HTML-режим.
+    path = lore_path(agent["name"])
+    if not path.exists():
+        return None
+    raw = path.read_text(encoding="utf-8-sig").strip()
+    return f"# Лор {agent['name']}\n\n{raw}"
+
+
 def lore_text(agent: dict) -> str:
-    lore = get_by_agent("lore", agent["uuid"], DB_PATH)
-    if not lore:
-        return f"<b>Лор {agent['name']}</b>\n\nЛор пока не добавлен."
-    parts = [f"<b>Лор {agent['name']}</b>"]
-    for entry in lore:
-        text = entry["text"]
-        if entry["source_url"]:
-            text += f'\n<a href="{entry["source_url"]}">Источник</a>'
-        parts.append(text)
-    return "\n\n".join(parts)[:4000]  # лимит сообщения Telegram — 4096
+    # Запасной вариант (обычное HTML-сообщение), если Rich Message не отправилось
+    title = f"<b>Лор {html.escape(agent['name'])}</b>"
+    path = lore_path(agent["name"])
+    if not path.exists():
+        return f"{title}\n\nЛор пока не добавлен."
+
+    # utf-8-sig — чтобы не мешал BOM, который ставит Блокнот Windows
+    raw = path.read_text(encoding="utf-8-sig").strip()
+
+    # Строки "### Заголовок" делаем жирными, остальной текст экранируем:
+    # бот работает в режиме HTML, и символы < > & в лоре сломали бы сообщение
+    lines = []
+    for line in raw.splitlines():
+        if line.startswith("### "):
+            lines.append(f"\n<b>{html.escape(line[4:].strip())}</b>")
+        else:
+            lines.append(html.escape(line))
+    text = f"{title}\n\n" + "\n".join(lines).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)  # не больше одной пустой строки подряд
+
+    # Обрезаем по границе строки, чтобы не разрезать тег <b>
+    if len(text) > MAX_MSG:
+        text = text[:MAX_MSG].rsplit("\n", 1)[0] + "\n\n…"
+    return text
 
 
 # ---------- Показ экранов ----------
 # Текстовые сообщения редактируем, а сообщение с фото (карточку) удаляем и шлём новое:
 # у фото нельзя заменить подпись на длинный текст
 
+async def clear_lore_anim(call: CallbackQuery) -> None:
+    # Гифка лора — отдельное сообщение над текстом; убираем её, когда уходим с экрана лора
+    msg_id = lore_anims.pop(call.message.chat.id, None)
+    if msg_id:
+        try:
+            await call.bot.delete_message(call.message.chat.id, msg_id)
+        except TelegramBadRequest:
+            pass  # уже удалено пользователем или слишком старое
+
+
 async def show_text(call: CallbackQuery, text: str, kb: InlineKeyboardMarkup) -> None:
-    if call.message.photo:
+    await clear_lore_anim(call)
+    if call.message.text is None:   # фото, гифка — у них нет текста, редактировать нельзя
         await call.message.delete()
         await call.message.answer(text, reply_markup=kb)
     else:
@@ -141,6 +228,7 @@ async def show_text(call: CallbackQuery, text: str, kb: InlineKeyboardMarkup) ->
 
 
 async def show_card(call: CallbackQuery, agent: dict) -> None:
+    await clear_lore_anim(call)
     kb = agent_kb(agent, "card")
     caption = card_text(agent)[:1024]  # лимит подписи к фото
     await call.message.delete()
@@ -148,6 +236,40 @@ async def show_card(call: CallbackQuery, agent: dict) -> None:
         await call.message.answer_photo(agent["portrait_url"], caption=caption, reply_markup=kb)
     else:
         await call.message.answer(caption, reply_markup=kb)
+
+
+async def send_lore(message: Message, agent: dict, kb: InlineKeyboardMarkup) -> None:
+    # Пробуем Rich Message (таблицы, заголовки); если Telegram его не принял
+    # (сломанная разметка, слишком длинный текст, старый Bot API) — шлём обычный HTML
+    md = lore_markdown(agent)
+    if md is not None:
+        try:
+            await message.answer_rich(InputRichMessage(markdown=md), reply_markup=kb)
+            return
+        except TelegramBadRequest as e:
+            logging.warning("Rich-лор %s не отправился, шлю обычный текст: %s", agent["name"], e)
+    await message.answer(lore_text(agent), reply_markup=kb)
+
+
+async def show_lore(call: CallbackQuery, agent: dict) -> None:
+    kb = agent_kb(agent, "lore")
+    # Rich Message нельзя получить через edit_text обычного сообщения,
+    # поэтому старое сообщение всегда удаляем и шлём новое
+    await clear_lore_anim(call)
+    await call.message.delete()
+
+    video = LORE_DIR / f"{lore_path(agent['name']).stem}_present_video.mp4"
+    if video.exists():
+        # Гифка — отдельным сообщением сверху, лор с кнопками — под ней
+        media = anim_cache.get(video.name) or FSInputFile(video)
+        anim_msg = await call.message.answer_animation(media)
+        # Если в ролике есть звук, Telegram сохранит его как видео, а не гифку — берём то, что пришло
+        media_obj = anim_msg.animation or anim_msg.video
+        if media_obj:
+            anim_cache[video.name] = media_obj.file_id
+        lore_anims[call.message.chat.id] = anim_msg.message_id
+
+    await send_lore(call.message, agent, kb)
 
 
 # ---------- Обработчики ----------
@@ -174,7 +296,9 @@ async def on_roles(call: CallbackQuery) -> None:
 
 @dp.callback_query(MenuCb.filter(F.action == "version"))
 async def on_version(call: CallbackQuery) -> None:
-    version = get_db_version(DB_PATH) or "неизвестна"
+    version = get_db_version(DB_PATH)
+    # "13.09.00.5777412" -> "13.09"
+    version = ".".join(version.split(".")[:2]) if version else "неизвестна"
     await call.answer(f"Данные для патча {version}", show_alert=True)
 
 
@@ -196,7 +320,7 @@ async def on_agent(call: CallbackQuery, callback_data: AgentCb) -> None:
     elif callback_data.view == "abilities":
         await show_text(call, abilities_text(agent), agent_kb(agent, "abilities"))
     elif callback_data.view == "lore":
-        await show_text(call, lore_text(agent), agent_kb(agent, "lore"))
+        await show_lore(call, agent)
     await call.answer()
 
 
@@ -215,6 +339,8 @@ async def main() -> None:
         if not get_db_version(DB_PATH):
             raise RuntimeError("База пустая, а valorant-api недоступен — бот не сможет работать") from e
 
+    LORE_DIR.mkdir(exist_ok=True)
+    log_missing_lore()
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await dp.start_polling(bot)
 
