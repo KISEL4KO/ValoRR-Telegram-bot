@@ -65,7 +65,7 @@ Telegram-бот — справочник по агентам VALORANT: роли,
 
 2. Установи зависимости:
    ```bash
-   pip install "aiogram>=3.31" requests python-dotenv matplotlib
+   pip install -r requirements.txt
    ```
 
 3. Создай бота у [@BotFather](https://t.me/BotFather) и положи токен в файл `.env`:
