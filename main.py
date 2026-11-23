@@ -13,12 +13,15 @@ from aiogram.filters import CommandStart
 from aiogram.filters.callback_data import CallbackData
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     FSInputFile,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     InputRichMessage,
     Message,
 )
+from charts import load_all_stats, render_ability_stats, render_agent_stats
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
@@ -31,6 +34,10 @@ from db_helper import (
     get_roles,
 )
 from sync import sync_agents
+
+import json
+
+
 
 load_dotenv()
 TOKEN = getenv("BOT_TOKEN")
@@ -45,6 +52,7 @@ LORE_DIR = Path(__file__).parent / "lore"
 
 anim_cache: dict[str, str] = {}   # имя видео -> file_id в Telegram (повторно не загружаем)
 lore_anims: dict[int, int] = {}   # chat_id -> id сообщения с гифкой, которое надо убрать при уходе
+ALL_STATS: dict[str, list[dict]] = {}
 MAX_MSG = 4000  # лимит сообщения Telegram — 4096, оставляем запас
 
 # Порядок способностей в карточке
@@ -54,6 +62,27 @@ SLOT_NAMES = {
     "Ultimate": "X (ульта)", "Passive": "Пассивка",
 }
 
+ABILITIES_DIR = Path(__file__).parent / "statistics"   # abilities/hush.json, abilities/kayo.json ...
+
+KEY_ORDER = {"Q": 1, "E": 2, "C": 3, "X": 4}          # порядок кнопок; пассивка идёт последней
+TYPE_NAMES = {
+    "passive": "пассивка", "basic": "обычная",
+    "signature": "сигнатурная", "ultimate": "ультимейт",
+}
+# (ключ в JSON, подпись, единица) — порядок строк в карточке
+STAT_FIELDS = [
+    ("cost", "💰 Цена", " кр."),
+    ("ult_points", "⭐ Очки ульты", ""),
+    ("uses", "🔁 Заряды", ""),
+    ("recharge_kills", "☠ Убийств для заряда", ""),
+    ("cooldown", "⏱ Кулдаун", " с"),
+    ("windup", "⌛ Задержка", " с"),
+    ("max_cast_duration", "🎯 Макс. каст", " с"),
+    ("duration", "⏳ Длительность", " с"),
+    ("duration_PF", "⏳ Длительность (огонь)", " с"),
+    ("duration_AF", "⏳ Длительность (альт. огонь)", " с"),
+    ("debuff", "💫 Дебафф", " с"),
+]
 
 # ---------- Данные, которые передают кнопки ----------
 # Telegram ограничивает callback_data 64 байтами — uuid (36) влезает
@@ -69,6 +98,10 @@ class RoleCb(CallbackData, prefix="role"):
 class AgentCb(CallbackData, prefix="agent"):
     uuid: str
     view: str            # card / abilities / lore
+
+class AbilityCb(CallbackData, prefix="ab"):
+    uuid: str
+    idx: int             # позиция способности в JSON-списке
 
 
 # ---------- Клавиатуры ----------
@@ -110,8 +143,47 @@ def agent_kb(agent: dict, current: str) -> InlineKeyboardMarkup:
         kb.button(text="📜 Лор", callback_data=AgentCb(uuid=uuid, view="lore"))
     if agent["role"]:
         kb.button(text="◀ К агентам", callback_data=RoleCb(role=agent["role"]))
+    if current != "stats":
+        kb.button(text="📊 Статистика", callback_data=AgentCb(uuid=uuid, view="stats"))
     kb.adjust(2)
     return kb.as_markup()
+
+def ordered_abilities(stats: list[dict]) -> list[tuple[int, dict]]:
+    # idx оставляем исходным (по нему ищем способность в JSON), меняем только порядок кнопок
+    def key(item):
+        ab = item[1]
+        if ab.get("type") == "passive":
+            return 5
+        return KEY_ORDER.get(str(ab.get("keybind", "")).upper(), 99)
+    return sorted(enumerate(stats), key=key)
+
+
+def ability_label(ab: dict) -> str:
+    key = ab.get("keybind") or "★"
+    return f"{key} · {str(ab.get('name', '?')).title()}"
+
+
+def abilities_kb(agent: dict, stats: list[dict]) -> InlineKeyboardMarkup:
+    base = agent_kb(agent, "abilities")
+    if not stats:
+        return base
+    kb = InlineKeyboardBuilder()
+    for i, ab in ordered_abilities(stats):
+        kb.button(text=ability_label(ab), callback_data=AbilityCb(uuid=agent["uuid"], idx=i))
+    kb.adjust(3)
+    # кнопки способностей сверху, обычная навигация (карточка/лор/назад) снизу
+    return InlineKeyboardMarkup(inline_keyboard=kb.as_markup().inline_keyboard + base.inline_keyboard)
+
+
+def ability_kb(agent: dict, stats: list[dict], current: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for i, ab in ordered_abilities(stats):
+        if i != current:   # текущую не показываем: иначе edit_text вернёт "message is not modified"
+            kb.button(text=ability_label(ab), callback_data=AbilityCb(uuid=agent["uuid"], idx=i))
+    kb.adjust(3)
+    back = InlineKeyboardBuilder()
+    back.button(text="◀ К способностям", callback_data=AgentCb(uuid=agent["uuid"], view="abilities"))
+    return InlineKeyboardMarkup(inline_keyboard=kb.as_markup().inline_keyboard + back.as_markup().inline_keyboard)
 
 
 # ---------- Тексты ----------
@@ -153,6 +225,51 @@ def lore_path(name: str) -> Path:
     key = re.sub(r"\W", "", name.lower())
     return LORE_DIR / (RU_TO_FILE.get(key, key) + ".txt")
 
+def load_ability_stats(agent: dict) -> list[dict]:
+    path = ABILITIES_DIR / (lore_path(agent["name"]).stem + ".json")
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as e:
+        logging.warning("Не прочитал %s: %s", path.name, e)
+        return []
+    return data if isinstance(data, list) else []
+
+
+def fmt_num(v) -> str:
+    if isinstance(v, (int, float)):
+        return f"{v:g}".replace(".", ",")      # 0.75 -> 0,75; 30.0 -> 30
+    return str(v)
+
+
+def ability_text(ab: dict) -> str:
+    key = html.escape(str(ab.get("keybind") or "★"))
+    name = html.escape(str(ab.get("name", "?")).title())
+    head = f"<b>[{key}] {name}</b>"
+    kind = TYPE_NAMES.get(ab.get("type"))
+    if kind:
+        head += f" — {kind}"
+    parts = [head]
+
+    if ab.get("description"):
+        parts.append(html.escape(ab["description"]))
+
+    lines = []
+    for field, label, unit in STAT_FIELDS:
+        v = ab.get(field)
+        if v is None:
+            continue
+        if field == "cost" and v == 0:
+            lines.append(f"{label}: бесплатно")
+        else:
+            lines.append(f"{label}: {fmt_num(v)}{unit}")
+    if lines:
+        parts.append("\n".join(lines))
+
+    if len(parts) == 1:
+        parts.append("Данных пока нет.")
+    return "\n\n".join(parts)
 
 def log_missing_lore() -> None:
     # При старте пишем в лог агентов без файла лора — сразу видно, где не совпало имя
@@ -207,6 +324,25 @@ def lore_text(agent: dict) -> str:
 # ---------- Показ экранов ----------
 # Текстовые сообщения редактируем, а сообщение с фото (карточку) удаляем и шлём новое:
 # у фото нельзя заменить подпись на длинный текст
+
+async def show_photo(
+    call: CallbackQuery,
+    png: bytes,
+    filename: str,
+    caption: str,
+    kb: InlineKeyboardMarkup,
+) -> None:
+    await clear_lore_anim(call)
+    photo = BufferedInputFile(png, filename=filename)
+    caption = caption[:1024]
+    if call.message.photo:
+        await call.message.edit_media(
+            InputMediaPhoto(media=photo, caption=caption),
+            reply_markup=kb,
+        )
+    else:
+        await call.message.delete()
+        await call.message.answer_photo(photo, caption=caption, reply_markup=kb)
 
 async def clear_lore_anim(call: CallbackQuery) -> None:
     # Гифка лора — отдельное сообщение над текстом; убираем её, когда уходим с экрана лора
@@ -318,9 +454,43 @@ async def on_agent(call: CallbackQuery, callback_data: AgentCb) -> None:
     if callback_data.view == "card":
         await show_card(call, agent)
     elif callback_data.view == "abilities":
-        await show_text(call, abilities_text(agent), agent_kb(agent, "abilities"))
+        stats = load_ability_stats(agent)
+        await show_text(call, abilities_text(agent), abilities_kb(agent, stats))
+    elif callback_data.view == "stats":
+        stats = load_ability_stats(agent)
+        if not stats:
+            await call.answer("Нет данных для статистики", show_alert=True)
+            return
+        png = await asyncio.to_thread(render_agent_stats, agent["name"], stats, ALL_STATS)
+        await show_photo(
+            call, png, f"{agent['uuid']}_stats.png",
+            f"<b>📊 Статистика {html.escape(agent['name'])}</b>",
+            agent_kb(agent, "stats"),
+        )
     elif callback_data.view == "lore":
         await show_lore(call, agent)
+    await call.answer()
+
+
+@dp.callback_query(AbilityCb.filter())
+async def on_ability(call: CallbackQuery, callback_data: AbilityCb) -> None:
+    agent = get_data("agents", callback_data.uuid, False, DB_PATH)
+    if agent is None:
+        await call.answer("Агент не найден", show_alert=True)
+        return
+    stats = load_ability_stats(agent)
+    if not 0 <= callback_data.idx < len(stats):
+        await call.answer("Данных о способности нет", show_alert=True)
+        return
+
+    ab = stats[callback_data.idx]
+    kb = ability_kb(agent, stats, callback_data.idx)
+    text = ability_text(ab)
+    png = await asyncio.to_thread(render_ability_stats, agent["name"], ab, ALL_STATS)
+    if png:
+        await show_photo(call, png, f"{agent['uuid']}_{callback_data.idx}.png", text, kb)
+    else:
+        await show_text(call, text, kb)
     await call.answer()
 
 
@@ -340,6 +510,7 @@ async def main() -> None:
             raise RuntimeError("База пустая, а valorant-api недоступен — бот не сможет работать") from e
 
     LORE_DIR.mkdir(exist_ok=True)
+    ABILITIES_DIR.mkdir(exist_ok=True)
     log_missing_lore()
     bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     await dp.start_polling(bot)

@@ -23,13 +23,6 @@ CREATE TABLE IF NOT EXISTS abilities (
     name        TEXT NOT NULL,       -- название способности
     description TEXT                 -- описание способности
 );
-
-CREATE TABLE IF NOT EXISTS lore (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,   -- id записи лора
-    agent_uuid  TEXT NOT NULL REFERENCES agents(uuid) ON DELETE CASCADE,  -- к какому агенту относится
-    text        TEXT NOT NULL,       -- сам текст лора
-    source_url  TEXT                 -- откуда взят текст (для указания источника)
-);
 """
 
 
@@ -129,13 +122,6 @@ def replace_abilities(agent_uuid: str, abilities: list[dict], path: Path):
         )
 
 
-# Добавить запись лора
-def add_lore(agent_uuid: str, text: str, source_url: str, path: Path):
-    with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO lore (agent_uuid, text, source_url) VALUES (?, ?, ?)",
-            (agent_uuid, text, source_url),
-        )
 
 # Все роли (для первого уровня кнопок)
 def get_roles(path: Path) -> list[str]:

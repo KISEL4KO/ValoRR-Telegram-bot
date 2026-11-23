@@ -1,0 +1,49 @@
+[
+  {
+    "type": "passive",
+    "name": "drift",
+    "description": "Удерживание клавиши прыжка в воздухе позволяет Jett плавно планировать вниз.",
+    "keybind": "Space",
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "cloudburst",
+    "description": "МГНОВЕННО бросить снаряд, создающий краткое дымовое облако при столкновении. Удерживание клавиши позволяет изгибать траекторию прицелом.",
+    "keybind": "C",
+    "uses": 2,
+    "cost": 200,
+    "duration": 2.5,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "updraft",
+    "description": "МГНОВЕННО подбросить Jett высоко в воздух.",
+    "keybind": "Q",
+    "uses": 1,
+    "cost": 150,
+    "demo": "path"
+  },
+  {
+    "type": "signature",
+    "name": "tailwind",
+    "description": "Активировать, чтобы подготовить порыв ветра. Повторное нажатие совершает мгновенный рывок в направлении движения (или вперёд, если Jett стоит).",
+    "keybind": "E",
+    "uses": 1,
+    "cost": 0,
+    "recharge_kills": 2,
+    "windup": 0.75,
+    "duration": 7.5,
+    "demo": "path"
+  },
+  {
+    "type": "ultimate",
+    "name": "blade storm",
+    "description": "Достать набор из 5 точных метательных ножей. ОГОНЬ — бросить один нож (восстанавливаются при убийстве), АЛЬТ. ОГОНЬ — бросить все оставшиеся ножи сразу.",
+    "keybind": "X",
+    "ult_points": 8,
+    "windup": null,
+    "demo": "path"
+  }
+]

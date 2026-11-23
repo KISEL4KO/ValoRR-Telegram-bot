@@ -1,0 +1,56 @@
+[
+  {
+    "type": "passive",
+    "name": "telekinesis",
+    "description": "Hush подбирает оружие, Спайк и взаимодействует с переключателями с увеличенного расстояния.",
+    "keybind": "F",
+    "cooldown": 30,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "flow",
+    "description": "МГНОВЕННО создаёт якорь. Если Hush в воздухе, она ненадолго зависает на месте. Через задержку устремляется к якорю.",
+    "keybind": "C",
+    "uses": 1,
+    "cost": 200,
+    "windup": 0.75,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "flashbulb",
+    "description": "Достать Flashbulb. ОГОНЬ — бросить, АЛЬТ. ОГОНЬ — подготовить. Повторное нажатие направляет её к прицелу. Взрывается при касании любой поверхности или через задержку, ослепляя всех, кто на неё смотрит.",
+    "keybind": "Q",
+    "uses": 1,
+    "cost": 250,
+    "windup": 0.5,
+    "duration_PF": 3,
+    "duration_AF": 8,
+    "debuff": 1.5,
+    "demo": "path"
+  },
+  {
+    "type": "signature",
+    "name": "displacement",
+    "description": "Достать Displacement. ОГОНЬ — бросить, АЛЬТ. ОГОНЬ — подготовить. Повторное нажатие направляет к прицелу. Взрывается при касании поверхности или через задержку, притягивая всех игроков к центру и оглушая тех, кто столкнётся с поверхностью или другим игроком.",
+    "keybind": "E",
+    "uses": 1,
+    "cost": 0,
+    "recharge_kills": 2,
+    "max_cast_duration": 2.5,
+    "windup": null,
+    "demo": "path"
+  },
+  {
+    "type": "ultimate",
+    "name": "suspension",
+    "description": "МГНОВЕННО подготовить Suspension. ОГОНЬ — отправить вперёд, направляя прицелом. Повторное нажатие — взорвать, подняв в воздух всех игроков.",
+    "keybind": "X",
+    "ult_points": 8,
+    "duration": 6,
+    "debuff": 4,
+    "windup": null,
+    "demo": "path"
+  }
+]

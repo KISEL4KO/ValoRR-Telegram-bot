@@ -1,0 +1,51 @@
+[
+  {
+    "type": "passive",
+    "name": "heating up",
+    "description": "Phoenix восстанавливает здоровье, находясь в своём огне от способностей Blaze и Hot Hands.",
+    "keybind": null,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "blaze",
+    "description": "Достать огненную стену. ОГОНЬ — выпустить линию огня, блокирующую обзор и наносящую урон врагам. Удерживать ОГОНЬ, чтобы изгибать стену по прицелу.",
+    "keybind": "C",
+    "uses": 1,
+    "cost": 150,
+    "duration": 8.0,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "hot hands",
+    "description": "Достать огненный шар. ОГОНЬ — бросить; взрывается при падении или через задержку, создавая горящую зону, наносящую урон врагам и лечащую Phoenix.",
+    "keybind": "Q",
+    "uses": 1,
+    "cost": 200,
+    "duration": 4.0,
+    "demo": "path"
+  },
+  {
+    "type": "signature",
+    "name": "curveball",
+    "description": "Достать вспышку. ОГОНЬ — изогнуть влево, АЛЬТ. ОГОНЬ — изогнуть вправо. Быстро взрывается, ослепляя всех, кто смотрит на неё.",
+    "keybind": "E",
+    "uses": 2,
+    "cost": 250,
+    "recharge_kills": 2,
+    "windup": 0.5,
+    "debuff": 1.5,
+    "demo": "path"
+  },
+  {
+    "type": "ultimate",
+    "name": "run it back",
+    "description": "МГНОВЕННО отметить текущую позицию. При смерти или окончании таймера Phoenix возвращается в отмеченную точку с полным здоровьем.",
+    "keybind": "X",
+    "ult_points": 6,
+    "duration": 10.0,
+    "windup": null,
+    "demo": "path"
+  }
+]

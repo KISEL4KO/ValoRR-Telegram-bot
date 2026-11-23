@@ -37,15 +37,24 @@ def sync_agents(path: Path = DB_PATH, force: bool = False) -> bool:
     init_db(path)
 
     version = fetch_version()
-    if not force and get_db_version(path) == version:
+    updated = force or get_db_version(path) != version
+    if updated:
+        agents = fetch_agents()
+        for a in agents:
+            save_agent(a, version, path)
+        print(f"Загружено агентов: {len(agents)} (версия {version})")
+    else:
         print(f"Данные актуальны (версия {version})")
-        return False
 
-    agents = fetch_agents()
-    for a in agents:
-        save_agent(a, version, path)
-    print(f"Загружено агентов: {len(agents)} (версия {version})")
-    return True
+    # Лор дозаполняем при каждом запуске — fill_lore() берёт только агентов без лора,
+    # так что когда всё заполнено, он ничего не делает.
+    # Ошибка лора (нет HF_TOKEN, упала нейросеть) не должна ломать загрузку агентов.
+    try:
+        b = 0
+    except Exception as e:
+        print(f"Лор не обновлён: {e}")
+
+    return updated
 
 
 if __name__ == "__main__":

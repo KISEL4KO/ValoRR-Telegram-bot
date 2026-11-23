@@ -1,0 +1,57 @@
+[
+  {
+    "type": "passive",
+    "name": "astral form",
+    "description": "Переход в Астральную форму для размещения звёзд на карте. Звёзды можно активировать позже, превращая их в Nova Pulse, Nebula или Gravity Well.",
+    "keybind": "X",
+    "uses": 4,
+    "cost": 150,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "gravity well",
+    "description": "Активировать звезду для создания Gravity Well. Игроки в области притягиваются к центру, после чего колодец взрывается, делая всех внутри уязвимыми.",
+    "keybind": "C",
+    "uses": 1,
+    "cost": 0,
+    "cooldown": 45,
+    "windup": 0.6,
+    "duration": 2.0,
+    "debuff": 5.0,
+    "demo": "path"
+  },
+  {
+    "type": "basic",
+    "name": "nova pulse",
+    "description": "Активировать звезду для создания Nova Pulse. После короткой задержки взрывается и оглушает всех игроков в области.",
+    "keybind": "Q",
+    "uses": 1,
+    "cost": 0,
+    "cooldown": 45,
+    "windup": 1.0,
+    "debuff": 4.0,
+    "demo": "path"
+  },
+  {
+    "type": "signature",
+    "name": "nebula",
+    "description": "Активировать звезду, чтобы превратить её в дымовую завесу Nebula. Нажатие F на звезде рассеивает её, возвращая заряд после задержки и оставляя ложную дымовую завесу.",
+    "keybind": "E",
+    "uses": 2,
+    "cost": 0,
+    "cooldown": 25,
+    "duration": 14.25,
+    "demo": "path"
+  },
+  {
+    "type": "ultimate",
+    "name": "cosmic divide",
+    "description": "В Астральной форме нажать АЛЬТ. ОГОНЬ для выбора двух точек. Создаёт бесконечную стену, блокирующую пули и сильно приглушающую звук.",
+    "keybind": "X",
+    "ult_points": 7,
+    "duration": 21,
+    "windup": null,
+    "demo": "path"
+  }
+]
